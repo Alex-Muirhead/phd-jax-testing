@@ -1,0 +1,18 @@
+---
+  version: "1.0"
+  revision-id: ed5eaa07
+  field-type: "fluid"
+  variables:
+   - 'pos.x'
+   - 'pos.y'
+   - 'vol'
+   - 'rho'
+   - 'vel.x'
+   - 'vel.y'
+   - 'p'
+   - 'a'
+   - 'shock-detector'
+   - 'massf-air'
+   - 'e'
+   - 'T'
+   - 'Qrad'
