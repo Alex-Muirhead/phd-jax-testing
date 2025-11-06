@@ -12,3 +12,6 @@ dependencies = [
 
 [tool.uv.sources]
 gdtk = { path = "../../../GDTk/gdtk.robust-python-modules/src/gdtk-py", editable = true }
+
+[tool.ruff]
+line-length = 100
