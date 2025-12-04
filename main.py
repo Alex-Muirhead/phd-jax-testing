@@ -1,3 +1,5 @@
+from jax._src.interpreters.partial_eval import convert_constvars_jaxpr
+from typing import overload
 import math
 from collections import deque, namedtuple
 from dataclasses import dataclass
@@ -20,15 +22,15 @@ MAX_VERTICES = 4
 SENTINAL = -1
 
 
-class IndexDict(dict):
+class IndexDict(dict[tuple[int, int], int]):
     _count: int
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Set the count correct from init
-        self._count = len(self)
+    def __init__(self, start: int = 0):
+        super().__init__()
+        # Set the count to start value
+        self._count = start
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: tuple[int, int]) -> int:
         # Use internal counter to avoid problems with del or pop
         if key in self:
             return super().__getitem__(key)
@@ -38,11 +40,11 @@ class IndexDict(dict):
         self._count += 1
         return new_index
 
-    def tolist(self):
+    def tolist(self) -> list[tuple[int, int]]:
         pairs = sorted(self.items(), key=lambda pair: pair[1])
         return list(map(lambda pair: pair[0], pairs))
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: tuple[int, int], value: int) -> int:
         raise NotImplementedError("IndexDict entries are immutable")
 
 
@@ -133,6 +135,10 @@ class Grid:
             case _:
                 raise ValueError("Grid must have 2 or 3 dimensions")
 
+        # We need a 0th indexed "dummy" facet, since all our indices will be >=1, to
+        # allow for the sign to be used as an indicator of direction
+        num_facets += 1
+
         # Anti-clockwise from BOTTOM-LEFT
         vertex_offsets = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]])
         # SOUTH, [FRONT,] EAST, NORTH, [BACK,], WEST
@@ -176,16 +182,19 @@ class Grid:
         cell_facets = np.full((num_cells, cell.num_facets), fill_value=SENTINAL)
 
         # Construct `facet_vertices`
-        facet_id_lookup = IndexDict()
+        # Start lookup at 1, so that we can use the sign
+        facet_id_lookup = IndexDict(start=1)
         for cell_idx in range(num_cells):
             # Store vertices in ascending order
             cell_facet_vertices = np.sort(cell_vertices[cell_idx, cell.facet_indices], axis=-1)
             cell_facet_ids = [facet_id_lookup[tuple(facet)] for facet in cell_facet_vertices]
 
             cell_facets[cell_idx, :] = cell_facet_ids
+            # A bit messy, but we need to account for the 1-offset
             facet_vertices[cell_facet_ids, :] = cell_facet_vertices
 
-        assert len(facet_id_lookup) == num_facets, "Predicted number of facets is incorrect."
+        # Ensure we count the "dummy" facet at index 0
+        assert len(facet_id_lookup) + 1 == num_facets, "Predicted number of facets is incorrect."
 
         facet_cells = np.full((num_facets, 2), fill_value=SENTINAL)
 
@@ -207,7 +216,8 @@ class Grid:
         facet_normals = np.empty((num_facets, num_dims))
         facet_offsets = np.empty((num_facets,))
 
-        for facet_id in range(num_facets):
+        # Don't do anything for our "dummy" facet
+        for facet_id in range(1, num_facets):
             facet_coordinates = vertex_coordinates[facet_vertices[facet_id, :], :]
             origin_cell = facet_cells[facet_id, 0]
             outwards_direction = np.mean(facet_coordinates, axis=0) - cell_center[origin_cell, :]
@@ -218,6 +228,7 @@ class Grid:
 
         geometry = GridGeometry(
             vertex_coordinates=vertex_coordinates,
+            cell_centers=cell_center,
             facet_normals=facet_normals,
             facet_offsets=facet_offsets,
         )
@@ -241,6 +252,9 @@ class GridGeometry:
 
     # Must be known / constructed from StructuredGrid
     vertex_coordinates: np.ndarray  # Coordinates (v,d)
+
+    # Storing them for now, maybe we can replace this info later
+    cell_centers: np.ndarray
 
     # Constructed from geom.vertices & topo.facet_vertices & topo.cell_vertices & topo.cell_adjacency?
     # Maybe pack together info (f,d+1) for cache efficiency later?
@@ -291,7 +305,28 @@ def main():
 
     mygrid = Grid.from_structured_grid(grid)
 
-    print(mygrid)
+    # Starting vector at center of cell id=0
+    cell_id = 0
+    p = mygrid.geometry.cell_centers[cell_id, :]
+    q = np.abs(np.random.rand(2))  # Ensure we go north-east for now
+    q /= np.linalg.norm(q)  # Normalise
+
+    facet_ids = mygrid.topology.cell_facets[cell_id, :]
+    facet_signs, facet_ids = np.sign(facet_ids), np.abs(facet_ids)
+    # Add new axis to `facet_signs` to ensure broadcast is correct
+    convex_normals = mygrid.geometry.facet_normals[facet_ids, :] * facet_signs[:, None]
+    convex_offsets = mygrid.geometry.facet_offsets[facet_ids] * facet_signs
+
+    print(convex_normals)
+
+    # b - A@p
+    t_all = (convex_offsets - convex_normals @ p) / (convex_normals @ q)
+    t_all[t_all <= 0] = np.nan
+    print(t_all)
+    t = np.nanmin(t_all)
+    idx = np.nanargmin(t_all)
+    print(f"t = {t:.3f} at facet {idx}")
+    print(f"p + tq = {p + t * q}")
 
 
 if __name__ == "__main__":
