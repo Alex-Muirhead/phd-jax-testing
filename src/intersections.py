@@ -28,7 +28,7 @@ class LinearRay(eqx.Module):
             raise ValueError("Shapes must match!")
 
 
-# @eqx.filter_jit
+@eqx.filter_jit
 def crossing(
     cell: ConvexCell, ray: LinearRay, epsilon: float = 0.0
 ) -> tuple[Int[Array, "..."], Float[Array, "..."]]:
@@ -39,16 +39,9 @@ def crossing(
     # Signed distance "outside" each half-space.
     absolute_distance = jnp.einsum("...k,...jk->...j", ray.terminus, cell.normal) - cell.offset
     alignment = jnp.einsum("...k,...jk->...j", ray.tangent, cell.normal)
-    relative_distance = absolute_distance + alignment * ray.travel
     absolute_travel: Float[Array, "... nfaces"] = -absolute_distance / alignment
     # Take minimum value greater than current travel
     absolute_travel = jnp.where(alignment > epsilon, absolute_travel, jnp.nan)
-    crossing_index: Int[Array, "..."] = jnp.where(
-        jnp.any(relative_distance > epsilon, axis=-1),
-        jnp.nanargmax(relative_distance, axis=-1),
-        jnp.nanargmin(absolute_travel, axis=-1),
-    )
-    crossing_travel: Float[Array, "..."] = jnp.maximum(
-        absolute_travel[..., crossing_index] - ray.travel, 0
-    )
+    crossing_index = jnp.nanargmin(absolute_travel, axis=-1)
+    crossing_travel = absolute_travel[..., crossing_index] - ray.travel
     return crossing_index, crossing_travel

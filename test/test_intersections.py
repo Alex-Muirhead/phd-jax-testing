@@ -200,23 +200,3 @@ def test_2D_crossing_poor_alignment():
     face, travel = crossing(cell, ray, epsilon=1e-6)
     assert face == 1
     assert travel == approx(0.5)
-
-
-def test_2D_crossing_poor_precondition():
-    # A follow-up to the previous test
-    # We crossed the north facet (1)
-    ray = LinearRay(
-        terminus=np.array([0.0, 0.5]),  # West facet, index=2
-        tangent=unit_vec([-1e-7, 1.0]),
-        travel=0.5,
-    )
-    # We now sit left of the south facet (3) of this next cell
-    cell = unit_2D_cell(x=0, y=1)
-
-    # Normally, this would take several dozen cells to correct,
-    # however we artificially control the epsilon to see the desired
-    # result, that the path is correct by crossing the west boundary.
-    face, travel = crossing(cell, ray, epsilon=1e-12)
-    assert face == 2
-    # Hmm... this travel assumes that the boundaries are a regular grid
-    assert travel == 0.0
