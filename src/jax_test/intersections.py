@@ -28,7 +28,7 @@ class LinearRay(eqx.Module):
             raise ValueError("Shapes must match!")
 
 
-@eqx.filter_jit
+# @eqx.filter_jit
 def crossing(
     cell: ConvexCell, ray: LinearRay, epsilon: float = 0.0
 ) -> tuple[Int[Array, "..."], Float[Array, "..."]]:

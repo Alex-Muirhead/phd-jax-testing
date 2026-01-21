@@ -1,13 +1,13 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from equinox._misc import currently_jitting
+from numpy.typing import NDArray
 from pytest import approx, mark, param
 
-from intersections import ConvexCell, LinearRay, crossing
+from jax_test.intersections import ConvexCell, LinearRay, crossing
 
 
-def unit_vec(a: list[float] | np.NDArray):
+def unit_vec(a: list[float] | NDArray):
     vec = np.asarray(a)
     return vec / np.linalg.vector_norm(vec)
 
@@ -28,7 +28,7 @@ def unit_2D_cell(x: int = 0, y: int = 0) -> ConvexCell:
         y (int): The lower-left y-coordinate
     """
     # fmt: off
-    backend = jnp if currently_jitting() else np 
+    backend = jnp
     normal = backend.array(
         [[+1.0,  0.0],
          [ 0.0, +1.0],
@@ -47,7 +47,7 @@ def unit_2D_cell(x: int = 0, y: int = 0) -> ConvexCell:
 def unit_3D_cell(x: int = 0, y: int = 0, z: int = 0) -> ConvexCell:
     """Generate a unit-cube cell."""
     # fmt: off
-    backend = jnp if currently_jitting() else np 
+    backend = jnp
     normal = backend.array(
         [[+1.0,  0.0,  0.0],
          [ 0.0, +1.0,  0.0],

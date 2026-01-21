@@ -21,6 +21,10 @@ dev = [
     "scipy>=1.16.3",
 ]
 
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
 [tool.uv.sources]
 gdtk = { path = "../../../GDTk/gdtk.pythonic-dataclasses/src/gdtk-py", editable = true }
 lox = { git = "https://github.com/huterguier/lox" }
@@ -28,6 +32,3 @@ lox = { git = "https://github.com/huterguier/lox" }
 [tool.ruff]
 line-length = 100
 ignore = ["F722"]
-
-[tool.pytest.ini_options]
-python_files = ["*.py"]
