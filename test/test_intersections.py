@@ -1,12 +1,12 @@
 import numpy as np
-import pytest
+from pytest import approx, mark, param
 
 from intersections import ConvexCell, LinearRay, crossing
 
 
 def unit_vec(a: list[float] | np.NDArray):
     vec = np.asarray(a)
-    return vec / np.linalg.norm(vec)
+    return vec / np.linalg.vector_norm(vec)
 
 
 def unit_2D_cell(x: int = 0, y: int = 0) -> ConvexCell:
@@ -159,14 +159,19 @@ def test_3D_containment_edges():
 
 
 testdata = [
-    (np.array([+1.0, 0.0]), 0, 0.5),
-    (np.array([0.0, +1.0]), 1, 0.5),
-    (np.array([-1.0, 0.0]), 2, 0.5),
-    (np.array([0.0, -1.0]), 3, 0.5),
+    param(np.array([+1.0, 0.0]), 0, 0.5, id="E"),
+    param(np.array([0.0, +1.0]), 1, 0.5, id="N"),
+    param(np.array([-1.0, 0.0]), 2, 0.5, id="W"),
+    param(np.array([0.0, -1.0]), 3, 0.5, id="S"),
+    # It will *always* be the small index of the faces (i.e. S or E => E)
+    param(unit_vec([+1.0, +1.0]), 0, np.sqrt(1 / 2), id="NE"),
+    param(unit_vec([-1.0, +1.0]), 1, np.sqrt(1 / 2), id="NW"),
+    param(unit_vec([-1.0, -1.0]), 2, np.sqrt(1 / 2), id="SW"),
+    param(unit_vec([+1.0, -1.0]), 0, np.sqrt(1 / 2), id="SE"),
 ]
 
 
-@pytest.mark.parametrize("direction,expected_face,expected_travel", testdata)
+@mark.parametrize("direction,expected_face,expected_travel", testdata)
 def test_2D_crossing_from_center(direction, expected_face, expected_travel):
     ray = LinearRay(
         terminus=np.array([0.5, 0.5]),
@@ -177,7 +182,7 @@ def test_2D_crossing_from_center(direction, expected_face, expected_travel):
 
     actual_face, actual_travel = crossing(cell, ray)
     assert actual_face == expected_face
-    assert actual_travel == pytest.approx(expected_travel)
+    assert actual_travel == approx(expected_travel)
 
 
 def test_2D_crossing_poor_alignment():
@@ -194,7 +199,7 @@ def test_2D_crossing_poor_alignment():
     # We expect to skip the problematic west boundary
     face, travel = crossing(cell, ray, epsilon=1e-6)
     assert face == 1
-    assert travel == pytest.approx(0.5)
+    assert travel == approx(0.5)
 
 
 def test_2D_crossing_poor_precondition():

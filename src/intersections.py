@@ -43,7 +43,6 @@ def crossing(
     absolute_travel: Float[Array, "... nfaces"] = -absolute_distance / alignment
     # Take minimum value greater than current travel
     absolute_travel = jnp.where(alignment > epsilon, absolute_travel, jnp.nan)
-    print(relative_distance, relative_distance > epsilon)
     crossing_index: Int[Array, "..."] = jnp.where(
         jnp.any(relative_distance > epsilon, axis=-1),
         jnp.nanargmax(relative_distance, axis=-1),
