@@ -7,13 +7,11 @@ from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
-import lox
 import numpy as np
 from gdtk import lmr
-from jaxtyping import Array, Int, Bool
+from jaxtyping import Array, Bool, Float, Int
 
 from jax_test.cellshapes import Shapes
 from jax_test.intersections import ConvexCell, LinearRay, crossing
@@ -354,33 +352,41 @@ def main():
         travel=jnp.zeros(num_stuff),
     )
 
-    TraceState = tuple[LinearRay, Int[Array, "..."], Bool[Array, "..."]]
+    # Start moving this to a type soon, rather than a simple alias
+    TraceState = tuple[
+        LinearRay,
+        Float[Array, "..."],
+        Int[Array, "..."],
+        Bool[Array, "..."],
+    ]
 
     def cond_fun(carry: TraceState) -> bool:
-        rays, cell_ids, active = carry
+        _, _, _, active = carry
         return jnp.any(active)
 
     def body_fun(carry: TraceState) -> TraceState:
-        rays, cell_ids, active = carry
+        rays, cummulative, cell_ids, active = carry
 
         cells = mygrid.get_cells(cell_ids)
         crossings, travels = crossing(cells, rays)
+        cummulative.at[cell_ids].add(jnp.where(active, travels, 0.0))
         rays = copy.replace(rays, travel=rays.travel + jnp.where(active, travels, 0.0))
 
         new_cell_ids = mygrid.topology.cell_adjacency[cell_ids, crossings]
         active &= new_cell_ids != -1
         cell_ids = jnp.where(active, new_cell_ids, cell_ids)
 
-        return rays, cell_ids, active
+        return rays, cummulative, cell_ids, active
 
+    cummulative = jnp.zeros(num_cells)
     active = jnp.ones(num_stuff, dtype=bool)
-    initial_state = (rays, cell_ids, active)
+    initial_state = (rays, cummulative, cell_ids, active)
 
     runner = partial(jax.lax.while_loop, cond_fun, body_fun, initial_state)
-    # final_state = lox.tap(runner, callback=print)()
-    final_state = runner()
+    final_rays, final_accumulation, final_cell_ids, _ = runner()
 
-    print(final_state)
+    print(final_rays.p)
+    print(final_cell_ids)
 
 
 if __name__ == "__main__":
