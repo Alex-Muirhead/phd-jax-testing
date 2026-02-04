@@ -18,6 +18,12 @@ class ConvexCell(eqx.Module):
         distance = jnp.einsum("...k,...jk->...j", points, self.normal) - self.offset
         return jnp.all(distance <= epsilon, axis=-1)
 
+    def __getitem__(self, idx) -> ConvexCell:
+        return ConvexCell(
+            normal=self.normal[idx],
+            offset=self.offset[idx],
+        )
+
 
 class LinearRay(eqx.Module):
     terminus: Float[Array, "... ndim"]
@@ -27,6 +33,17 @@ class LinearRay(eqx.Module):
     def __check_init__(self):
         if self.terminus.shape != self.tangent.shape:
             raise ValueError("Shapes must match!")
+
+    def __getitem__(self, idx) -> LinearRay:
+        return LinearRay(
+            terminus=self.terminus[idx],
+            tangent=self.tangent[idx],
+            travel=self.travel[idx],
+        )
+
+    @property
+    def p(self) -> Float[Array, "... ndim"]:
+        return self.terminus + self.travel[..., None] * self.tangent
 
 
 @eqx.filter_jit

@@ -1,3 +1,4 @@
+import copy
 import math
 from collections import deque, namedtuple
 from dataclasses import dataclass
@@ -6,14 +7,18 @@ from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import lox
 import numpy as np
 from gdtk import lmr
+from jaxtyping import Array, Int, Bool
 
 from jax_test.cellshapes import Shapes
 from jax_test.intersections import ConvexCell, LinearRay, crossing
+
+jax.config.update("jax_enable_x64", True)
 
 if TYPE_CHECKING:
     from typing import Self
@@ -230,20 +235,38 @@ class Grid:
             facet_offsets[facet_id] = offset
 
         geometry = GridGeometry(
-            vertex_coordinates=vertex_coordinates,
-            cell_centers=cell_center,
-            facet_normals=facet_normals,
-            facet_offsets=facet_offsets,
+            vertex_coordinates=jnp.array(vertex_coordinates),
+            cell_centers=jnp.array(cell_center),
+            facet_normals=jnp.array(facet_normals),
+            facet_offsets=jnp.array(facet_offsets),
         )
         topology = GridTopology(
-            cell_vertices=cell_vertices,
-            cell_adjacency=cell_adjacency,
-            cell_facets=cell_facets,
-            facet_cells=facet_cells,
-            facet_verties=facet_vertices,
+            cell_vertices=jnp.array(cell_vertices),
+            cell_adjacency=jnp.array(cell_adjacency),
+            cell_facets=jnp.array(cell_facets),
+            facet_cells=jnp.array(facet_cells),
+            facet_verties=jnp.array(facet_vertices),
         )
 
         return Grid(geometry=geometry, topology=topology)
+
+    def get_cells(self, cell_ids) -> ConvexCell:
+        # Construct the relevant cells
+        facet_ids = self.topology.cell_facets[cell_ids, :]
+        facet_signs, facet_ids = jnp.sign(facet_ids), jnp.abs(facet_ids)
+
+        # NOTE: This seems to inform us that our previous structure wasn't great, and
+        # could be improved? Maybe we have `CellTopology` and `CellGeometry` as
+        # our two subsets, and this one below would be `CellGeometry`.
+
+        # Not the best, not the worst
+        return ConvexCell(
+            normal=self.geometry.facet_normals[facet_ids] * facet_signs[..., None],
+            offset=self.geometry.facet_offsets[facet_ids] * facet_signs,
+        )
+
+    # def cross_cells(self, cell_ids, face_ids) -> ConvexCell:
+    #     new_cell_ids =
 
 
 @dataclass
@@ -283,7 +306,7 @@ class GridTopology:
 
     # Should be known / constructed from StructuredGrid?
     # Otherwise can be computed from cell_vertices (expensive)
-    facet_cells: np.ndarray  # Face-to-face connections (f,~?)
+    facet_cells: Int[Array, "ncells, 2"]  # Face-to-face connections (f,~?)
 
     # [NOTE]: We're getting some redundancy here. The triplet of
     # (this, cell_adjacency, cell_facets) is redundant, one can
@@ -291,7 +314,7 @@ class GridTopology:
     # Hmm, probably not great to use this, since currently we don't have
     # separate indices for each boundary. That means cell-id 0 (bottom-left
     # corner) will match to -1 for both WEST & SOUTH.
-    cell_adjacency: np.ndarray  # Cell-to-cell connections (c*f/2,2)
+    cell_adjacency: Int[Array, "ncells, nfacets"]  # Cell-to-cell connections (c,f)
 
     # Should be known / constructed from StructuredGrid?
     # Otherwise can be computed from cell_vertices (expensive)
@@ -321,14 +344,6 @@ def main():
     key, subkey = jax.random.split(key)
     num_stuff = 10
     cell_ids = jax.random.randint(subkey, num_stuff, minval=0, maxval=num_cells)
-    facet_ids = mygrid.topology.cell_facets[cell_ids, :]
-    facet_signs, facet_ids = jnp.sign(facet_ids), jnp.abs(facet_ids)
-
-    # Not the best, not the worst
-    cells = ConvexCell(
-        normal=mygrid.geometry.facet_normals[facet_ids] * facet_signs[..., None],
-        offset=mygrid.geometry.facet_offsets[facet_ids] * facet_signs,
-    )
 
     key, subkey = jax.random.split(key)
     directions = jax.random.normal(key, (num_stuff, 2))  # 2 dimensions
@@ -339,47 +354,31 @@ def main():
         travel=jnp.zeros(num_stuff),
     )
 
-    print(cells)
-    print(rays)
+    TraceState = tuple[LinearRay, Int[Array, "..."], Bool[Array, "..."]]
 
-    crossings, travels = crossing(cells, rays)
-    print(crossings)
-    print(travels)
+    def cond_fun(carry: TraceState) -> bool:
+        rays, cell_ids, active = carry
+        return jnp.any(active)
 
-    raise NotImplementedError
+    def body_fun(carry: TraceState) -> TraceState:
+        rays, cell_ids, active = carry
 
-    # Starting vector at center of cell id=0
-    cell_id = 0
-    q = np.abs(np.random.rand(2))  # Ensure we go north-east for now
-    q /= np.linalg.norm(q)  # Normalise
+        cells = mygrid.get_cells(cell_ids)
+        crossings, travels = crossing(cells, rays)
+        rays = copy.replace(rays, travel=rays.travel + jnp.where(active, travels, 0.0))
 
-    p = mygrid.geometry.cell_centers[cell_id, :]
+        new_cell_ids = mygrid.topology.cell_adjacency[cell_ids, crossings]
+        active &= new_cell_ids != -1
+        cell_ids = jnp.where(active, new_cell_ids, cell_ids)
 
-    def cond_fun(state: RayState) -> bool:
-        return state.current_cell_id != -1
+        return rays, cell_ids, active
 
-    def body_fun(state: RayState) -> RayState:
-        this_cell = state.current_cell_id
-        facet_ids = jnp.asarray(mygrid.topology.cell_facets)[this_cell, :]
-        facet_signs, facet_ids = jnp.sign(facet_ids), jnp.abs(facet_ids)
-        # Add new axis to `facet_signs` to ensure broadcast is correct
-        convex_normals = (
-            jnp.asarray(mygrid.geometry.facet_normals)[facet_ids, :] * facet_signs[:, None]
-        )
-        convex_offsets = jnp.asarray(mygrid.geometry.facet_offsets)[facet_ids] * facet_signs
+    active = jnp.ones(num_stuff, dtype=bool)
+    initial_state = (rays, cell_ids, active)
 
-        # b - A@p
-        t_all = (convex_offsets - convex_normals @ p) / (convex_normals @ q)
-        t_all = jnp.where(t_all <= state.distance, np.nan, t_all)
-        distance = jnp.nanmin(t_all)
-        idx = jnp.nanargmin(t_all)
-        next_cell = jnp.asarray(mygrid.topology.cell_adjacency)[this_cell, idx]
-        lox.log({"distance": distance, "move to cell": next_cell})
-        return RayState(current_cell_id=next_cell, distance=distance)
-
-    initial_state = RayState(current_cell_id=cell_id, distance=0)
     runner = partial(jax.lax.while_loop, cond_fun, body_fun, initial_state)
-    final_state = lox.tap(runner, callback=print)()
+    # final_state = lox.tap(runner, callback=print)()
+    final_state = runner()
 
     print(final_state)
 
